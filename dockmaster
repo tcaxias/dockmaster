@@ -1,0 +1,101 @@
+#!/usr/bin/python3
+
+import uuid
+import dateutil.parser as dt
+from docker import Client
+from pprint import pprint
+from datetime import datetime
+from time import sleep
+from multiprocessing import Process
+from os import environ, getpid
+from pykafka import KafkaClient
+from json import dumps as js
+
+def send_kafka(container, msg, endpoint):
+    kafka_topic = endpoint
+    with kafka_topic.get_producer(use_rdkafka=True, compression=2) as producer:
+        for line in msg:
+            producer.produce(js(line).encode(),
+                            partition_key=container['Id'].encode())
+    return True
+
+def chksum(data):
+    return uuid.uuid5(uuid.NAMESPACE_DNS,data.__str__()).__str__()
+
+def live_containers():
+    return tuple(map(lambda x: x['Id'], docker.containers()))
+
+def bootstrap(kafka_hosts='127.0.0.1:9092',topic='dockmaster'):
+    docker = Client(base_url='unix://var/run/docker.sock')
+    kafka = KafkaClient(kafka_hosts)
+    kafka_topic = kafka.topics[topic.encode()]
+    return docker, kafka_topic
+
+def announce(container,kafka_topic,msg='Container {}'):
+    now = datetime.utcnow().isoformat()
+    header = {'timestamp':now, 'metadata':container, '_id':chksum(container),
+            'data':msg.format(container['Id'])}
+    send_kafka(container, [header], kafka_topic)
+
+def info(container):
+    # https://rancher.jumia.com/v1/containers?externalId={}.format(id)
+    id, names, ip, service = (container['Id'], container['Names'],
+                            container.get('io.rancher.container.ip',''),
+                            container.get('io.rancher.stack_service.name',''))
+    return dict(zip(('id','names','ip','service'),
+                    (id, names, ip, service)))
+
+def docker_log(container,fd,pos=0):
+    if fd=='stdout':
+        logs = docker.logs(container['Id'], timestamps=True, since=pos,
+                            stderr=False).decode('utf-8').split('\r\n')
+    elif fd=='stderr':
+        logs = docker.logs(container['Id'], timestamps=True, since=pos,
+                            stdout=False).decode('utf-8').split('\r\n')
+    else:
+        print("Can only read 'stdout' or 'stderr' logs, not '{}'".format(fd))
+        exit(1)
+    logs = filter(lambda x: x!='',logs)
+    logs = map(lambda x: [fd] + x[0].split(' ',maxsplit=1),logs)
+    logs = [ {'fd':fd, 'timestamp':ts, '_id':chksum(fd+ts+data),
+                'metadata':info(container), 'data':data}
+                for fd,ts,data in logs ]
+    if logs:
+        pos = int(datetime.timestamp(dt.parse(logs[-1]['timestamp'])))+1
+    return logs, pos
+
+def listen(container,kafka_topic,out_pos=0,err_pos=0):
+    out_log, new_out_pos = docker_log(container,fd='stdout',pos=out_pos)
+    err_log, new_err_pos = docker_log(container,fd='stderr',pos=err_pos)
+    try:
+        send_kafka(container, out_log + err_log, kafka_topic)
+        return new_out_pos, new_err_pos
+    except:
+        return out_pos, err_pos
+
+def watch(container):
+    docker, kafka_topic = bootstrap()
+    announce(container, kafka_topic,
+            msg='Container {} started. Starting to get its logs.')
+    out_pos = err_pos = 0
+    while container['Id'] in live_containers():
+        out_pos, err_pos = listen(container, kafka_topic, out_pos, err_pos)
+        sleep(1) # CHANGE TO PROPER SLEEP CYCLES
+    announce(container, kafka_topic,
+            msg='Container {} exited. Ending its logging.')
+    print('Exiting worker with pid {}'.format(getpid()))
+    exit(0)
+
+if __name__ == '__main__':
+    env = dict(environ)
+    docker = Client(base_url='unix://var/run/docker.sock')
+    containers = {}
+    while not sleep(1): # CHANGE TO PROPER SLEEP CYCLES
+        containers = { id:pid for id,pid in containers.items() if p.is_alive() }
+        for container in docker.containers():
+            if container['Id'] not in containers:
+                p = Process(target=watch, args=(container,))
+                p.start()
+                if p.is_alive():
+                    containers[container['Id']] = p
+                    print('Spawned worker with pid {}'.format(p.pid))
