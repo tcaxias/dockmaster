@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import uuid
+import uuid, re
 import dateutil.parser as dt
 from docker import Client
 from pprint import pprint
@@ -10,6 +10,7 @@ from multiprocessing import Process
 from os import environ, getpid
 from pykafka import KafkaClient
 from json import dumps as js
+endpoints_regex = re.compile('([^:]+)://([^/]+)/?(.+)?')
 
 def send_kafka(container, msg, endpoint):
     kafka_topic = endpoint
@@ -25,11 +26,22 @@ def chksum(data):
 def live_containers():
     return tuple(map(lambda x: x['Id'], docker.containers()))
 
-def bootstrap(kafka_hosts='127.0.0.1:9092',topic='dockmaster'):
+def parse_endpoints(env,regex):
+    endpoints_list = env.split('|')
+    endpoints = [ x for x in
+                        map(lambda x: regex.match(x).groups(),endpoints_list) ]
+    # For now we'll only use one endpoint
+    return endpoints[0]
+
+def bootstrap(endpoint):
+    protocol, hosts, topic = endpoint
+    topic = 'dockmaster' if topic is None else topic
     docker = Client(base_url='unix://var/run/docker.sock')
-    kafka = KafkaClient(kafka_hosts)
-    kafka_topic = kafka.topics[topic.encode()]
-    return docker, kafka_topic
+    if protocol=='kafka':
+        kafka = KafkaClient(hosts)
+        kafka_topic = kafka.topics[topic.encode()]
+        return docker, kafka_topic
+    return False
 
 def announce(container,kafka_topic,msg='Container {}'):
     now = datetime.utcnow().isoformat()
@@ -73,8 +85,8 @@ def listen(container,kafka_topic,out_pos=0,err_pos=0):
     except:
         return out_pos, err_pos
 
-def watch(container):
-    docker, kafka_topic = bootstrap()
+def watch(container,endpoint):
+    docker, kafka_topic = bootstrap(endpoint)
     announce(container, kafka_topic,
             msg='Container {} started. Starting to get its logs.')
     out_pos = err_pos = 0
@@ -88,13 +100,15 @@ def watch(container):
 
 if __name__ == '__main__':
     env = dict(environ)
+    asked_endpoints = env.get('ENDPOINTS','kafka://127.0.0.1:9092')
+    endpoint = parse_endpoints(asked_endpoints, endpoints_regex)
     docker = Client(base_url='unix://var/run/docker.sock')
     containers = {}
     while not sleep(1): # CHANGE TO PROPER SLEEP CYCLES
         containers = { id:pid for id,pid in containers.items() if p.is_alive() }
         for container in docker.containers():
             if container['Id'] not in containers:
-                p = Process(target=watch, args=(container,))
+                p = Process(target=watch, args=(container,endpoint))
                 p.start()
                 if p.is_alive():
                     containers[container['Id']] = p

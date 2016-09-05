@@ -3,7 +3,7 @@ MAINTAINER Tiago Caxias http://github.com/tcaxias
 
 ENV \
     DEPS="build-base zlib-dev lz4-dev git bash" \
-    PYPI="pykafka" \
+    PYPI="pykafka python-dateutil docker-py" \
     APK="apk --update --no-cache" \
     ENDPOINTS="kafka://127.0.0.1:9092/dockmaster"
 
