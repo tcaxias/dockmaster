@@ -11,7 +11,7 @@ ENV \
 WORKDIR /app
 
 RUN \
-    $APK add $DEPS && \
+    $APK add $DEPS $PKGS && \
     cd /tmp && \
     git clone https://github.com/edenhill/librdkafka.git . && \
     ./configure && \

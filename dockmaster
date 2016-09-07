@@ -11,12 +11,14 @@ from os import environ, getpid
 from pykafka import KafkaClient
 from json import dumps as js
 endpoints_regex = re.compile('([^:]+)://([^/]+)/?(.+)?')
-rdKafka = False
-comp = 0
+ts_regex = re.compile('([^ ]+) ?(.*)')
+rdKafka = True
+k_comp = 2
 
 def send_kafka(container, msg, endpoint):
     kafka_topic = endpoint
-    with kafka_topic.get_producer(use_rdkafka=rdKafka, compression=comp) as producer:
+    with kafka_topic.get_producer(use_rdkafka=rdKafka,
+                                    compression=k_comp) as producer:
         for line in msg:
             producer.produce(js(line).encode(),
                             partition_key=container['Id'].encode())
@@ -38,7 +40,7 @@ def parse_endpoints(env,regex):
 def bootstrap(endpoint):
     protocol, hosts, topic = endpoint
     topic = 'dockmaster' if topic is None else topic
-    pprint((protocol, hosts, topic))
+    print("Bootstrapping: {}://{}/{}".format(protocol, hosts, topic))
     docker = Client(base_url='unix://var/run/docker.sock')
     if protocol=='kafka':
         kafka = KafkaClient(hosts)
@@ -71,7 +73,7 @@ def docker_log(container,fd,pos=0):
         print("Can only read 'stdout' or 'stderr' logs, not '{}'".format(fd))
         exit(1)
     logs = filter(lambda x: x!='',logs)
-    logs = map(lambda x: [fd] + x[0].split(' ',maxsplit=1),logs)
+    logs = map(lambda x: [fd] + list(ts_regex.match(x).groups()),logs)
     logs = [ {'fd':fd, 'timestamp':ts, '_id':chksum(fd+ts+data),
                 'metadata':info(container), 'data':data}
                 for fd,ts,data in logs ]
