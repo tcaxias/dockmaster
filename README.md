@@ -1,4 +1,4 @@
-Dockmaster is a naive ~100 lines program to send logs from docker to kafka.
+Dockmaster is a naive ~120 lines program to send logs from docker to kafka.
 All data is produced in JSON.
 It creates a key for every message, stored in '_id', in order to allow idempotent operations.
 
