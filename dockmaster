@@ -11,10 +11,12 @@ from os import environ, getpid
 from pykafka import KafkaClient
 from json import dumps as js
 endpoints_regex = re.compile('([^:]+)://([^/]+)/?(.+)?')
+rdKafka = False
+comp = 0
 
 def send_kafka(container, msg, endpoint):
     kafka_topic = endpoint
-    with kafka_topic.get_producer(use_rdkafka=True, compression=2) as producer:
+    with kafka_topic.get_producer(use_rdkafka=rdKafka, compression=comp) as producer:
         for line in msg:
             producer.produce(js(line).encode(),
                             partition_key=container['Id'].encode())
@@ -36,6 +38,7 @@ def parse_endpoints(env,regex):
 def bootstrap(endpoint):
     protocol, hosts, topic = endpoint
     topic = 'dockmaster' if topic is None else topic
+    pprint((protocol, hosts, topic))
     docker = Client(base_url='unix://var/run/docker.sock')
     if protocol=='kafka':
         kafka = KafkaClient(hosts)
