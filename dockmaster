@@ -13,7 +13,7 @@ from json import dumps as js
 endpoints_regex = re.compile('([^:]+)://([^/]+)/?(.+)?')
 ts_regex = re.compile('([^ ]+) ?(.*)')
 rdKafka = True
-k_comp = 2
+k_comp = 1 # gzip
 
 def send_kafka(container, msg, endpoint):
     kafka_topic = endpoint
