@@ -1,19 +1,13 @@
 #!/usr/bin/python3
 
-import uuid, re
-import dateutil.parser as dt
+import uuid, re, dateutil.parser as dt
 from docker import Client
 from pprint import pprint
 from datetime import datetime
 from time import sleep
-from multiprocessing import Process
 from os import environ, getpid
 from pykafka import KafkaClient
 from json import dumps as js
-endpoints_regex = re.compile('([^:]+)://([^/]+)/?(.+)?')
-ts_regex = re.compile('([^ ]+) ?(.*)')
-rdKafka = True
-k_comp = 1 # gzip
 
 def send_kafka(container, msg, endpoint):
     kafka_topic = endpoint
@@ -90,31 +84,29 @@ def listen(container,kafka_topic,out_pos=0,err_pos=0):
     except:
         return out_pos, err_pos
 
-def watch(container,endpoint):
-    docker, kafka_topic = bootstrap(endpoint)
-    announce(container, kafka_topic,
-            msg='Container {} started. Starting to get its logs.')
-    out_pos = err_pos = 0
-    while container['Id'] in live_containers():
-        out_pos, err_pos = listen(container, kafka_topic, out_pos, err_pos)
-        sleep(1) # CHANGE TO PROPER SLEEP CYCLES
-    announce(container, kafka_topic,
-            msg='Container {} exited. Ending its logging.')
-    print('Exiting worker with pid {}'.format(getpid()))
-    exit(0)
-
-if __name__ == '__main__':
-    env = dict(environ)
-    asked_endpoints = env.get('ENDPOINTS','kafka://127.0.0.1:9092')
-    endpoint = parse_endpoints(asked_endpoints, endpoints_regex)
-    docker = Client(base_url='unix://var/run/docker.sock')
-    containers = {}
-    while not sleep(1): # CHANGE TO PROPER SLEEP CYCLES
-        containers = { id:pid for id,pid in containers.items() if p.is_alive() }
-        for container in docker.containers():
-            if container['Id'] not in containers:
-                p = Process(target=watch, args=(container,endpoint))
-                p.start()
-                if p.is_alive():
-                    containers[container['Id']] = p
-                    print('Spawned worker with pid {}'.format(p.pid))
+# Set Global Vars
+endpoints_regex = re.compile('([^:]+)://([^/]+)/?(.+)?')
+ts_regex = re.compile('([^ ]+) ?(.*)')
+rdKafka = True
+k_comp = 1 # gzip
+# Main
+env = dict(environ)
+asked_endpoints = env.get('ENDPOINTS','kafka://127.0.0.1:9092')
+endpoint = parse_endpoints(asked_endpoints, endpoints_regex)
+docker, kafka_topic = bootstrap(endpoint)
+live_containers = {}
+while not sleep(1): # CHANGE TO PROPER SLEEP CYCLES
+    for _id in tuple(live_containers):
+        if docker.containers(filters={'id':_id,'status':'exited'},all=True):
+            announce(docker.containers(filters={'id':_id},all=True)[0],
+                kafka_topic,
+                msg='Dockmaster: Container {} exited. Ending its logging.')
+            live_containers.pop(_id)
+    for container in docker.containers():
+        _id = container['Id']
+        if _id not in live_containers:
+            live_containers[_id] = (0,0)
+            announce(container, kafka_topic,
+                msg='Dockmaster: Container {} started. Getting its logs.')
+        out_pos, err_pos = live_containers[_id]
+        live_containers[_id] = listen(container, kafka_topic, out_pos, err_pos)
