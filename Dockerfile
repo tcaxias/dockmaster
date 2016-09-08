@@ -3,7 +3,7 @@ MAINTAINER Tiago Caxias http://github.com/tcaxias
 
 ENV \
     DEPS="build-base zlib-dev lz4-dev git bash snappy-dev" \
-    PKGS="zlib snappy" \
+    PKGS="zlib snappy lz4" \
     PYPI="pykafka python-dateutil docker-py python-snappy" \
     APK="apk --update --no-cache" \
     ENDPOINTS="kafka://127.0.0.1:9092/dockmaster"
