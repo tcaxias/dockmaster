@@ -92,6 +92,14 @@ k_comp = 1 # gzip
 # Main
 env = dict(environ)
 asked_endpoints = env.get('ENDPOINTS','kafka://127.0.0.1:9092')
+asked_offset = env.get('OFFSET','')
+if asked_offset == 'ZERO':
+    offset = 0
+elif asked_offset == 'NOW':
+    int(datetime.timestamp(datetime.now()))
+else:
+    pprint("Please pick an offset for log retrieval in ['NOW','ZERO']")
+    quit(1)
 endpoint = parse_endpoints(asked_endpoints, endpoints_regex)
 docker, kafka_topic = bootstrap(endpoint)
 live_containers = {}
